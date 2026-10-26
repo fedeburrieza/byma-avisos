@@ -77,11 +77,21 @@ def traer_avisos():
     return r.json().get("data", [])
 
 
-def es_hecho_relevante(aviso):
-    ref = aviso.get("referencia", "").strip().lower()
-    if ref.startswith("hecho relevante de cedear"):
-        return False  # los hechos de cedears no interesan
-    return ref.startswith("hecho relevante")
+def clasificar(aviso):
+    """Devuelve el titulo del tipo de aviso que interesa, o None si se ignora."""
+    ref = " ".join(aviso.get("referencia", "").lower().split())
+    primer_tramo = ref.split(" - ")[0]
+    if "cedear" in primer_tramo:
+        return None  # nada de cedears (hechos relevantes ni avisos de pago)
+    if ref.startswith("hecho relevante"):
+        return "📢 HECHO RELEVANTE"
+    if ref.startswith("aviso de pago"):
+        return "💵 AVISO DE PAGO"
+    if ref.startswith("aviso de suscripción") or ref.startswith("aviso de suscripcion"):
+        return "📝 NUEVA SUSCRIPCIÓN"
+    if ref.startswith("aviso de resultado de colocación") or ref.startswith("aviso de resultado de colocacion"):
+        return "✅ RESULTADO DE COLOCACIÓN"
+    return None
 
 
 def pasa_filtro_ticker(aviso):
@@ -90,10 +100,10 @@ def pasa_filtro_ticker(aviso):
     return aviso.get("especie", "").upper() in TICKERS
 
 
-def formatear(aviso):
+def formatear(tipo, aviso):
     ticker = aviso.get("especie") or "-"
     return (
-        f"📢 HECHO RELEVANTE\n"
+        f"{tipo}\n"
         f"{aviso.get('emisor', '')} ({ticker})\n\n"
         f"{aviso.get('referencia', '')}\n\n"
         f"🕒 {aviso.get('fecha', '')[:16]}\n"
@@ -122,20 +132,22 @@ def pasada():
             continue
         vistos.add(id_)
         estado["seen"].append(id_)
-        if es_hecho_relevante(a) and pasa_filtro_ticker(a):
-            nuevos.append(a)
+        tipo = clasificar(a)
+        if tipo and pasa_filtro_ticker(a):
+            nuevos.append((tipo, a))
 
     if not estado["inicializado"]:
         # Primera corrida: se marcan como vistos sin enviar, para no inundarte.
         estado["inicializado"] = True
         print(f"Primera corrida: {len(avisos)} avisos marcados como vistos, no se envia nada.")
     else:
-        nuevos.sort(key=lambda a: a.get("fecha", ""))
-        for a in nuevos:
-            telegram(formatear(a))
-            print("Enviado:", a.get("emisor"), "-", a.get("referencia"))
+        nuevos.sort(key=lambda par: par[1].get("fecha", ""))
+        for tipo, a in nuevos:
+            telegram(formatear(tipo, a))
+            print("Enviado:", tipo, "-", a.get("emisor"), "-", a.get("referencia"))
+            time.sleep(1)  # evita topes de velocidad de Telegram
         if not nuevos:
-            print("Sin hechos relevantes nuevos.")
+            print("Sin avisos nuevos de los tipos elegidos.")
 
     guardar_estado(estado)
 
